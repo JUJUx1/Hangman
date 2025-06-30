@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Play a fun Hangman game with sound effects and QWERTY keyboard!">
+    <meta name="keywords" content="hangman, word game, free game">
+    <title>Hangman Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f0f0f0;
+            margin: 0;
+            padding: 10px;
+        }
+        canvas {
+            border: 1px solid #000;
+            margin: 20px auto;
+            background: #fff;
+            max-width: 100%;
+        }
+        #word-display {
+            font-size: 1.8em;
+            margin: 15px;
+            letter-spacing: 4px;
+            word-wrap: break-word;
+        }
+        #message {
+            font-size: 1.3em;
+            margin: 15px;
+            color: #333;
+        }
+        #letter-buttons {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            max-width: 90vw;
+            margin: 0 auto;
+        }
+        .keyboard-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 4px;
+            max-width: 100%;
+        }
+        .keyboard-row button {
+            width: clamp(25px, 7vw, 30px);
+            height: clamp(25px, 7vw, 30px);
+            font-size: clamp(0.7em, 1.8vw, 0.8em);
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .keyboard-row button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        /* Subtle offset for QWERTY look */
+        .keyboard-row:nth-child(2) {
+            margin-left: 10px;
+        }
+        .keyboard-row:nth-child(3) {
+            margin-left: 20px;
+        }
+        #restart {
+            padding: 8px 16px;
+            font-size: 1em;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        @media (max-width: 400px) {
+            #word-display {
+                font-size: 1.2em;
+                letter-spacing: 2px;
+            }
+            #message {
+                font-size: 1em;
+            }
+            canvas {
+                width: 160px;
+                height: 160px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Hangman Game</h1>
+    <canvas id="hangman-canvas" width="200" height="200"></canvas>
+    <div id="word-display"></div>
+    <div id="message"></div>
+    <div id="letter-buttons"></div>
+    <button id="restart" style="display: none;">Play Again</button>
+
+    <script>
+        const canvas = document.getElementById('hangman-canvas');
+        const ctx = canvas.getContext('2d');
+        const wordDisplay = document.getElementById('word-display');
+        const message = document.getElementById('message');
+        const letterButtons = document.getElementById('letter-buttons');
+        const restartButton = document.getElementById('restart');
+
+        let wordList = [];
+        let word = '';
+        let guessedLetters = [];
+        let wrongGuesses = 0;
+        const maxGuesses = 6;
+
+        // Initialize audio objects
+        const correctSound = new Audio('sounds/correct.mp3');
+        const wrongSound = new Audio('sounds/wrong.mp3');
+        const winSound = new Audio('sounds/win.mp3');
+        const loseSound = new Audio('sounds/lose.mp3');
+        const retrySound = new Audio('sounds/retry.mp3');
+        const hangedSound = new Audio('sounds/hanged.mp3');
+
+        // Preload audio
+        correctSound.preload = 'auto';
+        wrongSound.preload = 'auto';
+        winSound.preload = 'auto';
+        loseSound.preload = 'auto';
+        retrySound.preload = 'auto';
+        hangedSound.preload = 'auto';
+
+        // Load words from words.txt
+        async function loadWords() {
+            try {
+                message.textContent = 'Loading words...';
+                const response = await fetch('words.txt');
+                if (!response.ok) throw new Error('Failed to load word list');
+                const text = await response.text();
+                wordList = text.split('\n').map(word => word.trim().toLowerCase()).filter(word => word.length >= 4 && word.length <= 8);
+                if (!wordList.length) throw new Error('Empty word list');
+                message.textContent = '';
+            } catch (error) {
+                console.error('Error loading words:', error);
+                wordList = ['cake', 'book', 'tree', 'sun', 'moon'];
+                message.textContent = 'Using fallback words.';
+            }
+        }
+
+        // Draw hangman based on wrong guesses
+        function drawHangman() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#000';
+            ctx.beginPath();
+            ctx.moveTo(20, 180); ctx.lineTo(180, 180); ctx.stroke(); // Base
+            ctx.moveTo(50, 180); ctx.lineTo(50, 20); ctx.stroke(); // Pole
+            ctx.moveTo(50, 20); ctx.lineTo(120, 20); ctx.stroke(); // Top
+            ctx.moveTo(120, 20); ctx.lineTo(120, 40); ctx.stroke(); // Rope
+            if (wrongGuesses > 0) { ctx.beginPath(); ctx.arc(120, 60, 20, 0, Math.PI * 2); ctx.stroke(); } // Head
+            if (wrongGuesses > 1) { ctx.beginPath(); ctx.moveTo(120, 80); ctx.lineTo(120, 120); ctx.stroke(); } // Body
+            if (wrongGuesses > 2) { ctx.beginPath(); ctx.moveTo(120, 90); ctx.lineTo(100, 110); ctx.stroke(); } // Left arm
+            if (wrongGuesses > 3) { ctx.beginPath(); ctx.moveTo(120, 90); ctx.lineTo(140, 110); ctx.stroke(); } // Right arm
+            if (wrongGuesses > 4) { ctx.beginPath(); ctx.moveTo(120, 120); ctx.lineTo(100, 150); ctx.stroke(); } // Left leg
+            if (wrongGuesses > 5) { 
+                ctx.beginPath(); 
+                ctx.moveTo(120, 120); ctx.lineTo(140, 150); ctx.stroke(); // Right leg
+                hangedSound.play().catch(e => console.error('Hanged sound failed:', e));
+            }
+        }
+
+        // Update word display
+        function updateWordDisplay() {
+            wordDisplay.textContent = word
+                .split('')
+                .map(letter => guessedLetters.includes(letter) ? letter : '_')
+                .join(' ');
+        }
+
+        // Check game status
+        function checkGameStatus() {
+            if (wrongGuesses >= maxGuesses) {
+                message.textContent = `Game Over! The word was "${word}".`;
+                loseSound.play().catch(e => console.error('Lose sound failed:', e));
+                endGame();
+            } else if (word.split('').every(letter => guessedLetters.includes(letter))) {
+                message.textContent = 'You Win!';
+                winSound.play().catch(e => console.error('Win sound failed:', e));
+                endGame();
+            }
+        }
+
+        // End game
+        function endGame() {
+            letterButtons.innerHTML = '';
+            restartButton.style.display = 'block';
+        }
+
+        // Handle letter guess
+        function guessLetter(letter) {
+            if (!guessedLetters.includes(letter)) {
+                guessedLetters.push(letter);
+                document.querySelector(`button[data-letter="${letter}"]`).disabled = true;
+                if (!word.includes(letter)) {
+                    wrongGuesses++;
+                    wrongSound.play().catch(e => console.error('Wrong sound failed:', e));
+                    drawHangman();
+                } else {
+                    correctSound.play().catch(e => console.error('Correct sound failed:', e));
+                }
+                updateWordDisplay();
+                checkGameStatus();
+            }
+        }
+
+        // Start game
+        async function startGame() {
+            retrySound.play().catch(e => console.error('Retry sound failed:', e));
+            if (!wordList.length) await loadWords();
+            word = wordList[Math.floor(Math.random() * wordList.length)];
+            guessedLetters = [];
+            wrongGuesses = 0;
+            message.textContent = '';
+            restartButton.style.display = 'none';
+            drawHangman();
+            updateWordDisplay();
+
+            // Create QWERTY keyboard buttons
+            letterButtons.innerHTML = '';
+            const rows = [
+                'qwertyuiop',
+                'asdfghjkl',
+                'zxcvbnm'
+            ];
+            rows.forEach(row => {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'keyboard-row';
+                row.split('').forEach(letter => {
+                    const button = document.createElement('button');
+                    button.textContent = letter.toUpperCase();
+                    button.dataset.letter = letter;
+                    button.addEventListener('click', () => guessLetter(letter));
+                    rowDiv.appendChild(button);
+                });
+                letterButtons.appendChild(rowDiv);
+            });
+        }
+
+        // Keyboard input
+        document.addEventListener('keydown', (e) => {
+            const letter = e.key.toLowerCase();
+            if (/[a-z]/.test(letter) && !guessedLetters.includes(letter) && wrongGuesses < maxGuesses) {
+                guessLetter(letter);
+            }
+        });
+
+        // Restart game
+        restartButton.addEventListener('click', startGame);
+
+        // Initialize game
+        startGame();
+    </script>
+</body>
+</html>
